@@ -82,7 +82,6 @@ Certifique-se de que os arquivos `.env` estão presentes em cada diretório:
 
 ```bash
 cd api-principal-corretora
-chmod +x init-db.sh
 icacls init-db.sh /grant Everyone:F
 ```
 

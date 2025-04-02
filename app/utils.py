@@ -30,26 +30,20 @@ def get_cotacao_dolar():
         return None
 
 
-def calcular_saldo_usuario(user_id):
+def calcular_saldo_usd_usuario(user_id):
     """
-    Calcula o saldo em USD e BRL para um usuário com base em suas transações
+    Calcula o saldo em USD para um usuário com base em suas transações
     """
     from .models import Transacao
     
     transacoes = Transacao.query.filter_by(user_id=user_id).all()
     
     saldo_usd = 0
-    saldo_brl = 0
     
     for transacao in transacoes:
         if transacao.tipo == 'compra':
             saldo_usd += transacao.quantidade_usd
-            saldo_brl -= transacao.valor_brl
         else:  # venda
             saldo_usd -= transacao.quantidade_usd
-            saldo_brl += transacao.valor_brl
     
-    return {
-        'saldo_usd': saldo_usd,
-        'saldo_brl': saldo_brl
-    }
+    return saldo_usd

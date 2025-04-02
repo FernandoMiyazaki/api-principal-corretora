@@ -3,7 +3,7 @@ from flask_restx import Resource, fields
 from sqlalchemy.exc import IntegrityError
 from .extensions import db, api
 from .models import User, Transacao
-from .utils import get_endereco_by_cep, get_cotacao_dolar, calcular_saldo_usuario
+from .utils import get_endereco_by_cep, get_cotacao_dolar, calcular_saldo_usd_usuario
 
 # Blueprint
 main = Blueprint('main', __name__)
@@ -63,9 +63,8 @@ transaction_venda_model = api.model('TransactionVenda', {
     'quantidade_usd': fields.Float(required=True, description='Quantidade em USD para vender')
 })
 
-saldo_model = api.model('Saldo', {
-    'saldo_usd': fields.Float(description='Saldo em USD'),
-    'saldo_brl': fields.Float(description='Saldo em BRL')
+saldo_usd_model = api.model('SaldoUSD', {
+    'saldo_usd': fields.Float(description='Saldo em USD')
 })
 
 
@@ -264,8 +263,8 @@ class VendaTransaction(Resource):
         valor_brl = quantidade_usd * cotacao
         
         # Verifica se o usuário tem saldo em dólares suficiente
-        saldo = calcular_saldo_usuario(data['user_id'])
-        if saldo['saldo_usd'] < quantidade_usd:
+        saldo_usd = calcular_saldo_usd_usuario(data['user_id'])
+        if saldo_usd < quantidade_usd:
             return {'message': 'Saldo em dólares insuficiente'}, 400
         
         try:
@@ -303,9 +302,9 @@ class TransactionResource(Resource):
 @ns_users.param('id', 'ID do usuário')
 class UserBalance(Resource):
     @ns_users.doc('get_user_balance')
-    @ns_users.marshal_with(saldo_model)
+    @ns_users.marshal_with(saldo_usd_model)
     def get(self, id):
-        """Obtém o saldo em USD e BRL do usuário"""
+        """Obtém o saldo em USD do usuário"""
         user = User.query.get_or_404(id)
-        saldo = calcular_saldo_usuario(id)
-        return saldo
+        saldo_usd = calcular_saldo_usd_usuario(id)
+        return {"saldo_usd": saldo_usd}
