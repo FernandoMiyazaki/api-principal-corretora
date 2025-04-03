@@ -22,6 +22,25 @@ class User(db.Model):
 
     def __repr__(self):
         return f"<User {self.nome_completo}>"
+    
+    def to_dict(self):
+        """
+        Retorna uma representação do usuário em forma de dicionário para serialização
+        """
+        return {
+            'id': self.id,
+            'nome_completo': self.nome_completo,
+            'email': self.email,
+            'cpf': self.cpf,
+            'cep': self.cep,
+            'logradouro': self.logradouro,
+            'complemento': self.complemento,
+            'bairro': self.bairro,
+            'localidade': self.localidade,
+            'estado': self.estado,
+            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S') if self.created_at else None,
+            'updated_at': self.updated_at.strftime('%Y-%m-%d %H:%M:%S') if self.updated_at else None
+        }
 
 
 class Transacao(db.Model):
@@ -37,3 +56,17 @@ class Transacao(db.Model):
 
     def __repr__(self):
         return f"<Transacao {self.id} - {self.tipo}>"
+    
+    def to_dict(self):
+        """
+        Retorna uma representação da transação em forma de dicionário para serialização
+        """
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'tipo': self.tipo,
+            'quantidade_usd': self.quantidade_usd,
+            'valor_brl': self.valor_brl,
+            'cotacao': self.cotacao,
+            'data_transacao': self.data_transacao.strftime('%Y-%m-%d %H:%M:%S') if self.data_transacao else None
+        }
