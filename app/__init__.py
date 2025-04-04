@@ -1,6 +1,6 @@
 import os
 from flask import Flask
-from .extensions import db, migrate, cors, api
+from .extensions import cors, api
 from .routes import main, ns_users, ns_transactions
 from .config import config
 
@@ -12,8 +12,6 @@ def create_app(config_name=None):
     app.config.from_object(config[config_name])
     
     # Inicializa extensões
-    db.init_app(app)
-    migrate.init_app(app, db)
     cors.init_app(app)
     
     # Registra blueprints
@@ -25,9 +23,5 @@ def create_app(config_name=None):
     # Adiciona namespaces à API
     api.add_namespace(ns_users)
     api.add_namespace(ns_transactions)
-    
-    # Cria tabelas do banco de dados (em ambiente de desenvolvimento)
-    with app.app_context():
-        db.create_all()
     
     return app

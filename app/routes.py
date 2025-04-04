@@ -1,9 +1,19 @@
-from flask import request, jsonify, Blueprint
+from flask import request, Blueprint
 from flask_restx import Resource, fields
-from sqlalchemy.exc import IntegrityError
-from .extensions import db, api
-from .models import User, Transacao
-from .utils import get_endereco_by_cep, get_cotacao_dolar, calcular_saldo_usd_usuario
+from .extensions import api
+from .utils import (
+    consultar_api_viacep,
+    criar_usuario,
+    atualizar_usuario,
+    obter_usuario,
+    listar_usuarios,
+    excluir_usuario,
+    consultar_cotacao_dolar,
+    registrar_compra_dolar,
+    registrar_venda_dolar,
+    obter_transacao,
+    obter_saldo_usuario
+)
 
 # Blueprint
 main = Blueprint('main', __name__)
@@ -26,15 +36,6 @@ user_model = api.model('User', {
     'estado': fields.String(readonly=True, description='Estado')
 })
 
-
-user_update_model = api.model('UserUpdate', {
-    'nome_completo': fields.String(description='Nome completo do usuário'),
-    'email': fields.String(description='Email do usuário'),
-    'senha': fields.String(description='Senha do usuário'),
-    'cep': fields.String(description='CEP do usuário'),
-    'complemento': fields.String(description='Complemento do endereço')
-})
-
 transaction_model = api.model('Transaction', {
     'id': fields.Integer(readonly=True, description='ID da transação'),
     'user_id': fields.Integer(required=True, description='ID do usuário'),
@@ -45,17 +46,7 @@ transaction_model = api.model('Transaction', {
     'data_transacao': fields.DateTime(readonly=True, description='Data e hora da transação')
 })
 
-transaction_input_model = api.model('TransactionInput', {
-    'user_id': fields.Integer(required=True, description='ID do usuário'),
-    'valor_brl': fields.Float(required=True, description='Valor em BRL para compra de USD')
-})
-
-transaction_venda_model = api.model('TransactionVenda', {
-    'user_id': fields.Integer(required=True, description='ID do usuário'),
-    'quantidade_usd': fields.Float(required=True, description='Quantidade em USD para vender')
-})
-
-saldo_usd_model = api.model('SaldoUSD', {
+saldo_model = api.model('Saldo', {
     'saldo_usd': fields.Float(description='Saldo em USD')
 })
 
@@ -63,77 +54,55 @@ saldo_usd_model = api.model('SaldoUSD', {
 @ns_users.route('/')
 class UserList(Resource):
     @ns_users.doc('list_users')
-    @ns_users.marshal_list_with(user_model)
+    @ns_users.response(200, 'Sucesso')
+    @ns_users.response(500, 'Erro ao listar usuários')
     def get(self):
         """Lista todos os usuários"""
-        users = User.query.all()
-        return [user.to_dict() for user in users]
+        usuarios = listar_usuarios()
+        if usuarios is None:
+            return {'message': 'Erro ao obter usuários da API secundária'}, 500
+        return usuarios
 
     @ns_users.doc('create_user',
-                 params={
+                params={
                      'nome_completo': 'Nome completo do usuário',
                      'email': 'Email do usuário',
                      'senha': 'Senha do usuário',
                      'cpf': 'CPF do usuário',
                      'cep': 'CEP do usuário',
                      'complemento': 'Complemento do endereço (opcional)'
-                 })
-    @ns_users.response(201, 'Usuário criado com sucesso', user_model)
+                })
+    @ns_users.response(201, 'Usuário criado com sucesso')
     @ns_users.response(400, 'Dados inválidos')
     @ns_users.response(409, 'Email ou CPF já existente')
+    @ns_users.response(500, 'Erro ao criar usuário')
     def post(self):
         """Cria um novo usuário a partir de parâmetros"""
-        # Obtém os dados dos parâmetros
-        nome_completo = request.args.get('nome_completo')
-        email = request.args.get('email')
-        senha = request.args.get('senha')
-        cpf = request.args.get('cpf')
-        cep = request.args.get('cep')
-        complemento = request.args.get('complemento', '')
+        # Coleta os dados dos parâmetros
+        dados_usuario = {
+            'nome_completo': request.args.get('nome_completo'),
+            'email': request.args.get('email'),
+            'senha': request.args.get('senha'),
+            'cpf': request.args.get('cpf'),
+            'cep': request.args.get('cep'),
+            'complemento': request.args.get('complemento', '')
+        }
         
         # Verifica se os campos obrigatórios estão presentes
-        if not nome_completo:
-            return {'message': 'Campo obrigatório ausente: nome_completo'}, 400
-        if not email:
-            return {'message': 'Campo obrigatório ausente: email'}, 400
-        if not senha:
-            return {'message': 'Campo obrigatório ausente: senha'}, 400
-        if not cpf:
-            return {'message': 'Campo obrigatório ausente: cpf'}, 400
-        if not cep:
-            return {'message': 'Campo obrigatório ausente: cep'}, 400
+        for campo in ['nome_completo', 'email', 'senha', 'cpf', 'cep']:
+            if not dados_usuario.get(campo):
+                return {'message': f'Campo obrigatório ausente: {campo}'}, 400
         
-        # Consulta o CEP na API ViaCEP
-        endereco = get_endereco_by_cep(cep)
-        if not endereco or 'erro' in endereco:
-            return {'message': 'CEP inválido ou não encontrado'}, 400
+        # Envia para a API secundária
+        resultado = criar_usuario(dados_usuario)
+        if resultado is None:
+            return {'message': 'Erro ao criar usuário na API secundária'}, 500
         
-        try:
-            novo_usuario = User(
-                nome_completo=nome_completo,
-                email=email,
-                senha=senha,  # Em produção, deve-se usar hash
-                cpf=cpf,
-                cep=cep,
-                logradouro=endereco['logradouro'],
-                complemento=complemento,
-                bairro=endereco['bairro'],
-                localidade=endereco['localidade'],
-                estado=endereco['estado']
-            )
-            
-            db.session.add(novo_usuario)
-            db.session.commit()
-            
-            # Usando o método to_dict() para obter a representação serializável do usuário
-            return novo_usuario.to_dict(), 201
-            
-        except IntegrityError:
-            db.session.rollback()
-            return {'message': 'Email ou CPF já cadastrado'}, 409
-        except Exception as e:
-            db.session.rollback()
-            return {'message': f'Erro ao criar usuário: {str(e)}'}, 400
+        if 'message' in resultado:
+            # Se a API secundária retornou um erro
+            return resultado, 400 if 'inválido' in resultado['message'] else 409
+        
+        return resultado, 201
 
 
 @ns_users.route('/<int:id>')
@@ -141,134 +110,104 @@ class UserList(Resource):
 @ns_users.param('id', 'ID do usuário')
 class UserResource(Resource):
     @ns_users.doc('get_user')
-    @ns_users.marshal_with(user_model)
+    @ns_users.response(200, 'Sucesso')
+    @ns_users.response(500, 'Erro ao obter usuário')
     def get(self, id):
         """Obtém os dados de um usuário específico"""
-        user = User.query.get_or_404(id)
-        return user
+        usuario = obter_usuario(id)
+        if usuario is None:
+            return {'message': 'Erro ao obter usuário da API secundária'}, 500
+        if 'message' in usuario:
+            return {'message': 'Usuário não encontrado'}, 404
+        return usuario
 
     @ns_users.doc('update_user',
-                 params={
+                params={
                      'nome_completo': 'Nome completo do usuário',
                      'email': 'Email do usuário',
                      'senha': 'Senha do usuário',
                      'cep': 'CEP do usuário',
                      'complemento': 'Complemento do endereço'
-                 })
-    @ns_users.marshal_with(user_model)
+                })
+    @ns_users.response(200, 'Usuário atualizado')
+    @ns_users.response(400, 'Dados inválidos')
+    @ns_users.response(404, 'Usuário não encontrado')
+    @ns_users.response(409, 'Email já cadastrado para outro usuário')
+    @ns_users.response(500, 'Erro ao atualizar usuário')
     def put(self, id):
         """Atualiza os dados de um usuário"""
-        user = User.query.get_or_404(id)
+        # Coleta os dados dos parâmetros
+        dados_usuario = {}
+        for campo in ['nome_completo', 'email', 'senha', 'cep', 'complemento']:
+            valor = request.args.get(campo)
+            if valor is not None:
+                dados_usuario[campo] = valor
         
-        # Obtém os dados dos parâmetros
-        nome_completo = request.args.get('nome_completo')
-        email = request.args.get('email')
-        senha = request.args.get('senha')
-        cep = request.args.get('cep')
-        complemento = request.args.get('complemento')
+        # Envia para a API secundária
+        resultado = atualizar_usuario(id, dados_usuario)
+        if resultado is None:
+            return {'message': 'Erro ao atualizar usuário na API secundária'}, 500
         
-        # Atualiza os campos fornecidos
-        if nome_completo:
-            user.nome_completo = nome_completo
-        if email:
-            user.email = email
-        if senha:
-            user.senha = senha  # Em produção, deve-se usar hash
-        if cep:
-            # Se o CEP foi atualizado, consulta a API ViaCEP
-            endereco = get_endereco_by_cep(cep)
-            if not endereco or 'erro' in endereco:
-                return {'message': 'CEP inválido ou não encontrado'}, 400
-            
-            user.cep = cep
-            user.logradouro = endereco['logradouro']
-            user.bairro = endereco['bairro']
-            user.localidade = endereco['localidade']
-            user.estado = endereco['estado']
+        if 'message' in resultado:
+            if 'não encontrado' in resultado['message']:
+                return resultado, 404
+            elif 'inválido' in resultado['message']:
+                return resultado, 400
+            elif 'já cadastrado' in resultado['message']:
+                return resultado, 409
+            else:
+                return resultado, 500
         
-        if complemento is not None:  # Permite atualizar para string vazia
-            user.complemento = complemento
-        
-        try:
-            db.session.commit()
-            return user
-        except IntegrityError:
-            db.session.rollback()
-            return {'message': 'Email já cadastrado para outro usuário'}, 409
-        except Exception as e:
-            db.session.rollback()
-            return {'message': f'Erro ao atualizar usuário: {str(e)}'}, 400
+        return resultado
 
     @ns_users.doc('delete_user')
     @ns_users.response(204, 'Usuário excluído')
+    @ns_users.response(404, 'Usuário não encontrado')
+    @ns_users.response(500, 'Erro ao excluir usuário')
     def delete(self, id):
         """Exclui um usuário"""
-        user = User.query.get_or_404(id)
-        
-        try:
-            db.session.delete(user)
-            db.session.commit()
-            return '', 204
-        except Exception as e:
-            db.session.rollback()
-            return {'message': f'Erro ao excluir usuário: {str(e)}'}, 400
+        sucesso = excluir_usuario(id)
+        if not sucesso:
+            return {'message': 'Erro ao excluir usuário na API secundária'}, 500
+        return '', 204
 
 
 @ns_transactions.route('/compra')
 class CompraTransaction(Resource):
     @ns_transactions.doc('comprar_dolar',
-                       params={
-                           'user_id': 'ID do usuário',
-                           'valor_brl': 'Valor em BRL para compra de USD'
-                       })
-    @ns_transactions.marshal_with(transaction_model, code=201)
+                      params={
+                          'user_id': 'ID do usuário',
+                          'valor_brl': 'Valor em BRL para compra de USD'
+                      })
+    @ns_transactions.response(201, 'Compra registrada')
+    @ns_transactions.response(400, 'Dados inválidos')
+    @ns_transactions.response(404, 'Usuário não encontrado')
+    @ns_transactions.response(500, 'Erro ao registrar compra')
     def post(self):
         """Registra uma compra de dólares"""
-        # Obtém os dados dos parâmetros
-        user_id = request.args.get('user_id')
-        valor_brl_str = request.args.get('valor_brl')
+        # Coleta os dados dos parâmetros
+        dados_compra = {
+            'user_id': request.args.get('user_id'),
+            'valor_brl': request.args.get('valor_brl')
+        }
         
         # Verifica se os campos obrigatórios estão presentes
-        if not user_id:
-            return {'message': 'Campo obrigatório ausente: user_id'}, 400
-        if not valor_brl_str:
-            return {'message': 'Campo obrigatório ausente: valor_brl'}, 400
+        for campo in ['user_id', 'valor_brl']:
+            if not dados_compra.get(campo):
+                return {'message': f'Campo obrigatório ausente: {campo}'}, 400
         
-        try:
-            user_id = int(user_id)
-            valor_brl = float(valor_brl_str)
-        except ValueError:
-            return {'message': 'Formato inválido para user_id ou valor_brl'}, 400
+        # Envia para a API secundária
+        resultado = registrar_compra_dolar(dados_compra)
+        if resultado is None:
+            return {'message': 'Erro ao registrar compra na API secundária'}, 500
         
-        # Verifica se o usuário existe
-        user = User.query.get(user_id)
-        if not user:
-            return {'message': 'Usuário não encontrado'}, 404
+        if 'message' in resultado:
+            if 'não encontrado' in resultado['message']:
+                return resultado, 404
+            else:
+                return resultado, 400
         
-        # Obtém a cotação atual do dólar
-        cotacao_data = get_cotacao_dolar()
-        if not cotacao_data:
-            return {'message': 'Erro ao obter cotação do dólar'}, 500
-        
-        cotacao = cotacao_data['rates']['BRL']
-        quantidade_usd = valor_brl / cotacao
-        
-        try:
-            nova_transacao = Transacao(
-                user_id=user_id,
-                tipo='compra',
-                quantidade_usd=quantidade_usd,
-                valor_brl=valor_brl,
-                cotacao=cotacao
-            )
-            
-            db.session.add(nova_transacao)
-            db.session.commit()
-            
-            return nova_transacao, 201
-        except Exception as e:
-            db.session.rollback()
-            return {'message': f'Erro ao registrar compra: {str(e)}'}, 400
+        return resultado, 201
 
 
 @ns_transactions.route('/venda')
@@ -278,59 +217,37 @@ class VendaTransaction(Resource):
                            'user_id': 'ID do usuário',
                            'quantidade_usd': 'Quantidade em USD para vender'
                        })
-    @ns_transactions.marshal_with(transaction_model, code=201)
+    @ns_transactions.response(201, 'Venda registrada')
+    @ns_transactions.response(400, 'Dados inválidos')
+    @ns_transactions.response(404, 'Usuário não encontrado')
+    @ns_transactions.response(500, 'Erro ao registrar venda')
     def post(self):
         """Registra uma venda de dólares"""
-        # Obtém os dados dos parâmetros
-        user_id = request.args.get('user_id')
-        quantidade_usd_str = request.args.get('quantidade_usd')
+        # Coleta os dados dos parâmetros
+        dados_venda = {
+            'user_id': request.args.get('user_id'),
+            'quantidade_usd': request.args.get('quantidade_usd')
+        }
         
         # Verifica se os campos obrigatórios estão presentes
-        if not user_id:
-            return {'message': 'Campo obrigatório ausente: user_id'}, 400
-        if not quantidade_usd_str:
-            return {'message': 'Campo obrigatório ausente: quantidade_usd'}, 400
+        for campo in ['user_id', 'quantidade_usd']:
+            if not dados_venda.get(campo):
+                return {'message': f'Campo obrigatório ausente: {campo}'}, 400
         
-        try:
-            user_id = int(user_id)
-            quantidade_usd = float(quantidade_usd_str)
-        except ValueError:
-            return {'message': 'Formato inválido para user_id ou quantidade_usd'}, 400
+        # Envia para a API secundária
+        resultado = registrar_venda_dolar(dados_venda)
+        if resultado is None:
+            return {'message': 'Erro ao registrar venda na API secundária'}, 500
         
-        # Verifica se o usuário existe
-        user = User.query.get(user_id)
-        if not user:
-            return {'message': 'Usuário não encontrado'}, 404
+        if 'message' in resultado:
+            if 'não encontrado' in resultado['message']:
+                return resultado, 404
+            elif 'insuficiente' in resultado['message']:
+                return resultado, 400
+            else:
+                return resultado, 400
         
-        # Obtém a cotação atual do dólar
-        cotacao_data = get_cotacao_dolar()
-        if not cotacao_data:
-            return {'message': 'Erro ao obter cotação do dólar'}, 500
-        
-        cotacao = cotacao_data['rates']['BRL']
-        valor_brl = quantidade_usd * cotacao
-        
-        # Verifica se o usuário tem saldo em dólares suficiente
-        saldo_usd = calcular_saldo_usd_usuario(user_id)
-        if saldo_usd < quantidade_usd:
-            return {'message': 'Saldo em dólares insuficiente'}, 400
-        
-        try:
-            nova_transacao = Transacao(
-                user_id=user_id,
-                tipo='venda',
-                quantidade_usd=quantidade_usd,
-                valor_brl=valor_brl,
-                cotacao=cotacao
-            )
-            
-            db.session.add(nova_transacao)
-            db.session.commit()
-            
-            return nova_transacao, 201
-        except Exception as e:
-            db.session.rollback()
-            return {'message': f'Erro ao registrar venda: {str(e)}'}, 400
+        return resultado, 201
 
 
 @ns_transactions.route('/<int:id>')
@@ -338,11 +255,16 @@ class VendaTransaction(Resource):
 @ns_transactions.param('id', 'ID da transação')
 class TransactionResource(Resource):
     @ns_transactions.doc('get_transaction')
-    @ns_transactions.marshal_with(transaction_model)
+    @ns_transactions.response(200, 'Sucesso')
+    @ns_transactions.response(500, 'Erro ao obter transação')
     def get(self, id):
         """Obtém os dados de uma transação específica"""
-        transaction = Transacao.query.get_or_404(id)
-        return transaction
+        transacao = obter_transacao(id)
+        if transacao is None:
+            return {'message': 'Erro ao obter transação da API secundária'}, 500
+        if 'message' in transacao:
+            return {'message': 'Transação não encontrada'}, 404
+        return transacao
 
 
 @ns_users.route('/<int:id>/saldo')
@@ -350,9 +272,13 @@ class TransactionResource(Resource):
 @ns_users.param('id', 'ID do usuário')
 class UserBalance(Resource):
     @ns_users.doc('get_user_balance')
-    @ns_users.marshal_with(saldo_usd_model)
+    @ns_users.response(200, 'Sucesso')
+    @ns_users.response(500, 'Erro ao obter saldo')
     def get(self, id):
         """Obtém o saldo em USD do usuário"""
-        user = User.query.get_or_404(id)
-        saldo_usd = calcular_saldo_usd_usuario(id)
-        return {"saldo_usd": saldo_usd}
+        saldo = obter_saldo_usuario(id)
+        if saldo is None:
+            return {'message': 'Erro ao obter saldo da API secundária'}, 500
+        if 'message' in saldo:
+            return {'message': 'Usuário não encontrado'}, 404
+        return saldo

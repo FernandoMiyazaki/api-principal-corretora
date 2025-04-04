@@ -5,10 +5,6 @@ load_dotenv()
 
 class Config:
     SECRET_KEY = os.environ.get('SECRET_KEY', 'dev_key')
-    SQLALCHEMY_DATABASE_URI = os.environ.get(
-        'DATABASE_URL', 'postgresql://postgres:postgres@db:5432/api_principal'
-    )
-    SQLALCHEMY_TRACK_MODIFICATIONS = False
     DEBUG = os.environ.get('DEBUG', 'False').lower() == 'true'
     TESTING = False
     VIACEP_API_URL = os.environ.get('VIACEP_API_URL', 'http://api-secundaria-viacep:5001')
