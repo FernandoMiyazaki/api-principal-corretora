@@ -16,7 +16,7 @@ class User(db.Model):
     bairro = db.Column(db.String(50), nullable=False)
     localidade = db.Column(db.String(50), nullable=False)
     estado = db.Column(db.String(50), nullable=False)
-    transacoes = db.relationship('Transacao', backref='user', lazy=True)
+    transacoes = db.relationship('Transacao', backref='user', lazy=True, cascade="all, delete-orphan")
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
