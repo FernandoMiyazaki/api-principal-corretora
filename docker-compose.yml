@@ -1,0 +1,101 @@
+version: '3.8'
+
+services:
+  # API Principal
+  api-principal-corretora:
+    build:
+      context: ./
+      dockerfile: Dockerfile
+    container_name: api-principal-corretora
+    restart: always
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./:/app
+    env_file:
+      - .env
+    depends_on:
+      - db
+      - api-secundaria-viacep
+      - api-secundaria-frankfurter
+    networks:
+      - app-network
+
+  # API ViaCEP
+  api-secundaria-viacep:
+    build:
+      context: ../api-secundaria-viacep
+      dockerfile: Dockerfile
+    container_name: api-secundaria-viacep
+    restart: always
+    ports:
+      - "5001:5001"
+    volumes:
+      - ../api-secundaria-viacep:/app
+    env_file:
+      - ../api-secundaria-viacep/.env
+    depends_on:
+      - db
+    networks:
+      - app-network
+
+  # API Frankfurter
+  api-secundaria-frankfurter:
+    build:
+      context: ../api-secundaria-frankfurter
+      dockerfile: Dockerfile
+    container_name: api-secundaria-frankfurter
+    restart: always
+    ports:
+      - "5002:5002"
+    volumes:
+      - ../api-secundaria-frankfurter:/app
+    env_file:
+      - ../api-secundaria-frankfurter/.env
+    depends_on:
+      - db
+    networks:
+      - app-network
+
+  # PostgreSQL
+  db:
+    image: postgres:15
+    container_name: postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_MULTIPLE_DATABASES: api_viacep,api_frankfurter
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sh:/docker-entrypoint-initdb.d/init-db.sh
+    ports:
+      - "5432:5432"
+    networks:
+      - app-network
+
+  # pgAdmin
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: pgadmin
+    restart: always
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_LISTEN_PORT: 80
+    ports:
+      - "8080:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      - db
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  pgadmin_data:
